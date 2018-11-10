@@ -28,11 +28,14 @@ import Prelude hiding (log)
 
 import Unsafe.Coerce
 
+-- | A `Task` is a reified reader of an accessor function for the same context.
 newtype Task c k v x = Task { run :: forall f. c f => (k -> f v) -> f x }
 
+-- | Apply a task to an accessor and wrap the result in a `Task`.
 task :: (forall f. c f => (k -> f v) -> f x) -> Task c k v x
 task t = Task (t $)
 
+-- | Apply an accessor to a key and wrap the result in a `Task`.
 fetch :: k -> Task c k v v
 fetch t = task ($ t)
 
@@ -242,7 +245,7 @@ displayWith nm f = fetch (DisplayKey nm f)
 
 buildForm :: (c (StateT [(Int,View)] IO))
           => (Int -> Value -> View -> IO ()) 
-          -> (Int -> Value -> IO ())
+          -> (Int -> Value -> IO () -> IO ())
           -> IO ()
           -> Map.Map Int (View,Value) 
           -> Task c Key Value a
@@ -261,19 +264,20 @@ buildForm insert update rerun state f = execStateT (run f fetch) []
             _               -> add h value view
         go Nothing h = \case
             TextKey nm f -> do
-                let v = f (update h . Text)
+                let v = f (\t -> update h (Text t) (return ()))
                     i = Text ""
                 lift (insert h i v)
                 add h i v
             SelectKey nm f -> do
-                let v = f (update h . Pure.Forms.Selected . Just)
+                let v = f (\x -> update h (Pure.Forms.Selected (Just x)) (return ()))
                     i = Pure.Forms.Selected Nothing
                 lift (insert h i v)
                 add h i v
             ButtonKey nm f -> do
-                let v = f (update h (Clicked True)) 
+                let v = f (update h (Clicked True) reset) 
                     i = Clicked False
-                lift (insert h i v)
+                    reset = insert h i v
+                lift reset
                 add h i v
             DisplayKey nm f -> do
                 let i = Unit
@@ -304,9 +308,9 @@ formWith = ComponentIO $ \self ->
                 let insert h v view = upd $ \fs -> 
                         let formState' = Map.insert h (view,v) (formState fs) 
                         in fs { formState = formState' }
-                    update h v = updM $ \fs -> 
+                    update h v before = updM $ \fs -> 
                         let formState' = Map.adjust (\(view,_) -> (view,v)) h (formState fs) 
-                        in return (fs { formState = formState' }, run)
+                        in return (fs { formState = formState' }, before >> run)
                     run = void $ do
                         (f,_) <- Pure.ask self
                         st <- Pure.get self
