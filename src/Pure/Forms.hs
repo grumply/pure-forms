@@ -165,14 +165,14 @@ instance (Monad (Task (MonadWriter w) k v), Monoid w) => MonadWriter w (Task (Mo
 
 data Key
     = TextKey    Txt ((Txt -> IO ()) -> View)
-    | forall a. SelectKey Txt ((a -> IO ()) -> View)
+    | forall a. SelectKey Txt (Maybe a) ((a -> IO ()) -> View)
     | ButtonKey  Txt (IO () -> View)
     | DisplayKey Txt (IO () -> View)
     | forall a. LiftKey (IO a)
 
 instance Hashable Key where
     hashWithSalt s (TextKey t _)    = hashWithSalt s t
-    hashWithSalt s (SelectKey t _)  = hashWithSalt s t
+    hashWithSalt s (SelectKey t _ _)= hashWithSalt s t
     hashWithSalt s (ButtonKey t _)  = hashWithSalt s t
     hashWithSalt s (DisplayKey t _) = hashWithSalt s t
     hashWithSalt _ (LiftKey _)      = 0
@@ -212,24 +212,46 @@ button_ nm f = fmap (\(Clicked b) -> b) (fetch (ButtonKey nm f))
 button :: Functor (Form c) => Identifier -> Txt -> Form c Bool
 button nm l = button_ nm (\f -> Button <| Id nm . Type "button" . OnClick (const f) |> [ fromTxt l ])
 
-simpleRadio :: (Data a, Typeable a) => a -> (a -> IO ()) -> (View,View)
-simpleRadio a f = 
+simpleRadio :: (Data a, Typeable a) => a -> (a -> IO ()) -> Bool -> (View,View)
+simpleRadio a f b =
     let ty = toTxt $ tyConName $ typeRepTyCon (typeOf a)
         i = toTxt (show (toConstr a))
-    in ( Pure.Input <| Id i . Type "radio" . Pure.Name ty . OnClick (const (f a))
+    in ( Pure.Input <| Id i . Type "radio" . Pure.Name ty . (if b then Checked "" else id) . OnClick (const (f a))
        , Label <| For i |> [ fromTxt i ]
        )
 
-radio_ :: Functor (Form c) => Identifier -> ((a -> IO ()) -> View) -> Form c (Maybe a)
-radio_ nm f = fmap (\(Pure.Forms.Selected ma) -> unsafeCoerce ma) (fetch (SelectKey nm f))
+radio_ :: Functor (Form c) => Identifier -> Maybe a -> ((a -> IO ()) -> View) -> Form c (Maybe a)
+radio_ nm ma f = fmap (\(Pure.Forms.Selected ma) -> unsafeCoerce ma) (fetch (SelectKey nm ma f))
 
-radioEnum :: (Enum a, Bounded a, Data a, Typeable a, Functor (Form c)) => Identifier -> Form c (Maybe a)
-radioEnum nm = radio_ nm $ \f -> 
-        Div <| Id nm |> 
-            (uncurry merge $ unzip $ fmap (flip simpleRadio f) [minBound..maxBound])
+radioEnum :: (Enum a, Bounded a, Data a, Typeable a, Functor (Form c)) => Identifier -> Maybe a -> Form c (Maybe a)
+radioEnum nm ma = radio_ nm ma $ \f ->
+        Div <| Id nm |>
+            (uncurry merge $ unzip $ fmap (\a -> simpleRadio a f False) [minBound..maxBound])
     where
         merge (x:xs) (y:ys) = x : y : merge xs ys
         merge [] y = y
+
+simpleCheckbox :: (Data a, Typeable a) => a -> (a -> IO ()) -> Bool -> (View,View)
+simpleCheckbox a f b =
+    let ty = toTxt $ tyConName $ typeRepTyCon (typeOf a)
+        i = toTxt (show (toConstr a))
+    in ( Pure.Input <| Id i . Type "checkbox" . Pure.Name ty . (if b then Checked "" else id) . OnClick (const (f a))
+       , Label <| For i |> [ fromTxt i ]
+       )
+
+checkbox_ :: Functor (Form c) => Identifier -> Maybe a -> ((a -> IO ()) -> View) -> Form c (Maybe a)
+checkbox_ nm ma f = fmap (\(Pure.Forms.Selected ma) -> unsafeCoerce ma) (fetch (SelectKey nm ma f))
+
+checkboxes :: (Data a, Typeable a, Applicative (Form c)) => Identifier -> [(a,Bool)] -> Form c [a]
+checkboxes nm = fmap catMaybes . sequenceA . fmap option
+    where
+        option (a,b) =
+            radio_ nm (if b then Just a else Nothing) $ \f ->
+                let (i,l) = simpleCheckbox a f b
+                in Div <| Id nm |> [ l, i ]
+
+checkboxEnum :: (Eq a, Enum a, Bounded a, Data a, Typeable a, Applicative (Form c)) => Identifier -> [a] -> Form c [a]
+checkboxEnum nm selected = checkboxes nm (fmap (\x -> (x,x `List.elem` selected)) [minBound .. maxBound])
 
 log :: (Show a, Functor (Form c)) => a -> Form c ()
 log = io . print
@@ -268,9 +290,9 @@ buildForm insert update rerun state f = execStateT (run f fetch) []
                     i = Text ""
                 lift (insert h i v)
                 add h i v
-            SelectKey nm f -> do
+            SelectKey nm ma f -> do
                 let v = f (\x -> update h (Pure.Forms.Selected (Just x)) (return ()))
-                    i = Pure.Forms.Selected Nothing
+                    i = Pure.Forms.Selected ma
                 lift (insert h i v)
                 add h i v
             ButtonKey nm f -> do
@@ -305,13 +327,16 @@ formWith = ComponentIO $ \self ->
         def
             { construct = return (FormState [] mempty)
             , executing =
-                let insert h v view = upd $ \fs -> 
+                let insert h v view = updM $ \fs -> do
+                        print "insert"
                         let formState' = Map.insert h (view,v) (formState fs) 
-                        in fs { formState = formState' }
-                    update h v before = updM $ \fs -> 
+                        return (fs { formState = formState' },return ())
+                    update h v before = updM $ \fs -> do
+                        print "update"
                         let formState' = Map.adjust (\(view,_) -> (view,v)) h (formState fs) 
-                        in return (fs { formState = formState' }, before >> run)
+                        return (fs { formState = formState' }, before >> run)
                     run = void $ do
+                        print "run"
                         (f,_) <- Pure.ask self
                         st <- Pure.get self
                         vs <- buildForm insert update run (formState st) f
