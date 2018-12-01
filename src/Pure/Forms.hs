@@ -315,34 +315,45 @@ data FormState = FormState
     , formState :: Map.Map Int (View,Value)
     }
 
-form :: (Typeable a, Typeable c, c (StateT [(Int,View)] IO)) => Form c a -> View
-form f = formWith (f,id)
+form :: (Typeable a, Typeable c, c (StateT [(Int,View)] IO)) => Txt -> Form c a -> View
+form nm f = formWith nm f id
 
-formWith :: (Typeable a, Typeable c, c (StateT [(Int,View)] IO)) => (Form c a,View -> View) -> View
-formWith = ComponentIO $ \self -> 
+formWith :: (Typeable a, Typeable c, c (StateT [(Int,View)] IO)) => Txt -> Form c a -> (View -> View) -> View
+formWith nm f v = flip LibraryComponentIO (nm,f,v) $ \self -> 
     let 
         upd = modify_ self . const
+
         updM = modifyM_ self . const
+
+        insert h v view = updM $ \fs -> do
+            let formState' = Map.insert h (view,v) (formState fs) 
+            return (fs { formState = formState' },return ())
+
+        update h v before = updM $ \fs -> do
+            let formState' = Map.adjust (\(view,_) -> (view,v)) h (formState fs) 
+            return (fs { formState = formState' }, before >> run)
+
+        run = void $ do
+            (_,f,_) <- Pure.ask self
+            st <- Pure.get self
+            vs <- buildForm insert update run (formState st) f
+            upd $ \fs -> 
+                let formState' = Map.intersection (formState fs) (Map.fromList (fmap (\(i,v) -> (i,(v,Unit))) vs))
+                in fs { formView = vs }
+
+        empty = FormState [] mempty
+
     in
         def
-            { construct = return (FormState [] mempty)
-            , executing =
-                let insert h v view = updM $ \fs -> do
-                        print "insert"
-                        let formState' = Map.insert h (view,v) (formState fs) 
-                        return (fs { formState = formState' },return ())
-                    update h v before = updM $ \fs -> do
-                        print "update"
-                        let formState' = Map.adjust (\(view,_) -> (view,v)) h (formState fs) 
-                        return (fs { formState = formState' }, before >> run)
-                    run = void $ do
-                        print "run"
-                        (f,_) <- Pure.ask self
-                        st <- Pure.get self
-                        vs <- buildForm insert update run (formState st) f
-                        upd $ \fs -> 
-                            let formState' = Map.intersection (formState fs) (Map.fromList (fmap (\(i,v) -> (i,(v,Unit))) vs))
-                            in fs { formView = vs }
-                in run
-            , render = \(_,f) (FormState v _) -> f (Keyed Form <||#> v)
+            { construct = return empty
+            , executing = run
+            , receive = \np os -> do
+                run
+                return os
+            , updated = \o@(nm,_,_) _ -> do
+                (nm',_,_) <- Pure.ask self
+                when (nm /= nm') $ 
+                    updM $ \_ -> 
+                        return (empty,run)
+            , render = \(_,_,f) (FormState v _) -> f (Keyed Form <||#> v)
             }
