@@ -347,7 +347,10 @@ formWith nm f v = flip LibraryComponentIO (nm,f,v) $ \self ->
         def
             { construct = return empty
             , executing = run
-            , updated = \(nm,_,_) _ -> do
+            , receive = \np os -> do
+                run
+                return os
+            , updated = \o@(nm,_,_) _ -> do
                 (nm',_,_) <- Pure.ask self
                 when (nm /= nm') $ 
                     updM $ \_ -> 
