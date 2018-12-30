@@ -3,7 +3,7 @@
 
 name:                pure-forms
 version:             0.7.0.0
-synopsis:            A polymorphic constraint experiment with forms
+synopsis:            Monadic form builder
 -- description:
 homepage:            github.com/grumply/pure-forms
 license:             BSD3
@@ -20,12 +20,12 @@ library
   exposed-modules:     Pure.Forms
   -- other-modules:
   -- other-extensions:
-  build-depends:       base         >= 4.11    && < 4.12,
-                       pure         >= 0.7     && < 1,
-                       base         >= 4.7     && < 5,
-                       containers   >= 0.5.7.1 && < 0.6,
-                       mtl          >= 2.2.1   && < 2.3,
-                       transformers >= 0.5.2.0 && < 0.6,
-                       hashable
+  build-depends:       base          >= 4.11    && < 4.12,
+                       pure-state    >= 0.7     && < 1,
+                       pure-json     >= 0.7     && < 1,
+                       pure-txt-trie >= 0.7     && < 1,
+                       base          >= 4.7     && < 5,
+                       mtl           >= 2.2.1   && < 2.3,
+                       transformers  >= 0.5.2.0 && < 0.6
   hs-source-dirs:      src
   default-language:    Haskell2010
