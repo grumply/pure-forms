@@ -21,7 +21,7 @@ library
   -- other-modules:
   -- other-extensions:
   build-depends:       base          >= 4.11    && < 4.12,
-                       pure-state    >= 0.7     && < 1,
+                       pure          >= 0.7     && < 1,
                        pure-json     >= 0.7     && < 1,
                        pure-txt-trie >= 0.7     && < 1,
                        base          >= 4.7     && < 5,
