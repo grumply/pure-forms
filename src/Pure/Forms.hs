@@ -21,34 +21,36 @@ import Control.Monad.State.Class
 import Data.Maybe
 import Data.Typeable
 
+type Trie phantom = TxtTrie Value
+
 newtype FormStore = FormStore { unFormStore :: SRef (TxtTrie Value) }
-newtype FormM m a = FormM { unFormM :: StateT FormStore (PureM (TxtTrie Value) m) a }
+newtype FormM ty m a = FormM { unFormM :: StateT FormStore (PureM (Trie ty) m) a }
   deriving (Functor,Applicative,Monad,Alternative,MonadPlus)
 
-type FormIO a = FormM IO a
+type FormIO ty a = FormM ty IO a
 
-instance Monad m => MonadState FormStore (FormM m) where
+instance Monad m => MonadState FormStore (FormM ty m) where
   {-# INLINE get #-}
   get = FormM get
   {-# INLINE put #-}
   put s = FormM (put s)
 
-instance MonadIO m => MonadIO (FormM m) where
+instance MonadIO m => MonadIO (FormM ty m) where
   {-# INLINE liftIO #-}
   liftIO = FormM . liftIO
 
-instance MonadTrans FormM where
+instance MonadTrans (FormM ty) where
   {-# INLINE lift #-}
   lift = FormM . lift . lift
 
-instance MonadFix m => MonadFix (FormM m) where
+instance MonadFix m => MonadFix (FormM ty m) where
   {-# INLINE mfix #-}
   mfix = FormM . mfix . (unFormM .)
 
-formWith :: (Monad m,Typeable m) => (forall a. m a -> IO a) -> FormM m View -> View
+formWith :: forall ty m. (Monad m,Typeable m) => (forall a. m a -> IO a) -> FormM ty m View -> View
 formWith g f = runPureWith g mempty $ \(FormStore -> st) -> evalStateT (unFormM f) st
 
-form :: FormIO View -> View
+form :: FormIO ty View -> View
 form f = runPureWithIO mempty $ \(FormStore -> st) -> evalStateT (unFormM f) st
 
 value :: forall a m. (MonadIO m, MonadState FormStore m, FromJSON a) => Txt -> m (Maybe a)
@@ -72,8 +74,8 @@ valueWith (FormStore ref) f = do
 storeWith :: forall a m. (MonadIO m, ToJSON a) => FormStore -> Txt -> a -> m ()
 storeWith (FormStore ref) k v = modifyWith ref (Trie.insert k (toJSON v))
 
-field :: forall a m. (MonadIO m, ToJSON a, FromJSON a)
-      => Txt -> a -> ((a -> IO ()) -> FormM m View) -> FormM m (View,a)
+field :: forall ty a m. (MonadIO m, ToJSON a, FromJSON a)
+      => Txt -> a -> ((a -> IO ()) -> FormM ty m View) -> FormM ty m (View,a)
 field k def f = get >>= \st -> do
   ma <- value k
   v <- f (storeWith st k)
