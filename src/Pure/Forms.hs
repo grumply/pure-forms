@@ -14,22 +14,20 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Fix
 import Control.Monad.IO.Class
+import Control.Monad.State.Class as State
 import Control.Monad.Trans
 import Control.Monad.Trans.State (StateT,evalStateT)
-import Control.Monad.State.Class
 
 import Data.Maybe
 import Data.Typeable
 
-type Trie phantom = TxtTrie Value
-
-newtype FormStore = FormStore { unFormStore :: SRef (TxtTrie Value) }
-newtype FormM ty m a = FormM { unFormM :: StateT FormStore (PureM (Trie ty) m) a }
+newtype FormStore ty = FormStore { unFormStore :: SRef (ty,TxtTrie Value) }
+newtype FormM ty m a = FormM { unFormM :: StateT (FormStore ty) (PureM (ty,TxtTrie Value) m) a }
   deriving (Functor,Applicative,Monad,Alternative,MonadPlus)
 
 type FormIO ty a = FormM ty IO a
 
-instance Monad m => MonadState FormStore (FormM ty m) where
+instance Monad m => MonadState (FormStore ty) (FormM ty m) where
   {-# INLINE get #-}
   get = FormM get
   {-# INLINE put #-}
@@ -47,32 +45,32 @@ instance MonadFix m => MonadFix (FormM ty m) where
   {-# INLINE mfix #-}
   mfix = FormM . mfix . (unFormM .)
 
-formWith :: forall ty m. (Monad m,Typeable m) => (forall a. m a -> IO a) -> FormM ty m View -> View
-formWith g f = runPureWith g mempty $ \(FormStore -> st) -> evalStateT (unFormM f) st
+formWith :: forall ty m. (Monad m, Typeable ty, Typeable m) => ty -> (forall a. m a -> IO a) -> FormM ty m View -> View
+formWith ty g f = runPureWith g (ty,mempty) $ \(FormStore -> st) -> evalStateT (unFormM f) st
 
-form :: FormIO ty View -> View
-form f = runPureWithIO mempty $ \(FormStore -> st) -> evalStateT (unFormM f) st
+form :: Typeable ty => ty -> FormIO ty View -> View
+form ty f = runPureWithIO (ty,mempty) $ \(FormStore -> st) -> evalStateT (unFormM f) st
 
-value :: forall a m. (MonadIO m, MonadState FormStore m, FromJSON a) => Txt -> m (Maybe a)
+value :: forall a ty m. (MonadIO m, FromJSON a) => Txt -> FormM ty m (Maybe a)
 value k = do
   FormStore ref <- get
-  store <- getWith ref
+  (_,store) <- getWith ref
   case Trie.lookup k store of
     Just (fromJSON -> Success a) -> pure (Just a)
     _ -> pure Nothing
 
-store :: forall a m. (MonadIO m, MonadState FormStore m, ToJSON a) => Txt -> a -> m ()
+store :: forall a ty m. (MonadIO m, ToJSON a) => Txt -> a -> FormM ty m ()
 store k v = get >>= \st -> storeWith st k v
 
-valueWith :: forall a m. (MonadIO m, FromJSON a) => FormStore -> Txt -> m (Maybe a)
+valueWith :: forall a ty m. (MonadIO m, FromJSON a) => FormStore ty -> Txt -> m (Maybe a)
 valueWith (FormStore ref) f = do
-  m <- getWith ref
-  case Trie.lookup f m of
+  (_,store) <- getWith ref
+  case Trie.lookup f store of
     Just (fromJSON -> Success a) -> pure (Just a)
     _ -> pure Nothing
 
-storeWith :: forall a m. (MonadIO m, ToJSON a) => FormStore -> Txt -> a -> m ()
-storeWith (FormStore ref) k v = modifyWith ref (Trie.insert k (toJSON v))
+storeWith :: forall a ty m. (MonadIO m, ToJSON a) => FormStore ty -> Txt -> a -> m ()
+storeWith (FormStore ref) k v = modifyWith ref (fmap (Trie.insert k (toJSON v)))
 
 field :: forall ty a m. (MonadIO m, ToJSON a, FromJSON a)
       => Txt -> a -> ((a -> IO ()) -> FormM ty m View) -> FormM ty m (View,a)
