@@ -4,6 +4,7 @@
 module Pure.Forms where
 
 import Pure hiding (get)
+import Pure.State
 import Pure.Data.Txt.Trie as Trie
 import Pure.Data.JSON
 
@@ -11,7 +12,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Fix
 import Control.Monad.IO.Class
-import Control.Monad.State.Class as State
 import Control.Monad.Trans
 import Control.Monad.Trans.State (StateT,evalStateT)
 

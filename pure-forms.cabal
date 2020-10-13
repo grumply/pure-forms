@@ -19,6 +19,7 @@ library
   exposed-modules:     Pure.Forms
   build-depends:       base,
                        pure,
+                       pure-state,
                        pure-json,
                        pure-txt-trie,
                        base,
