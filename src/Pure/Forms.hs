@@ -3,7 +3,7 @@
              MultiParamTypeClasses, FlexibleContexts #-}
 module Pure.Forms where
 
-import Pure hiding (get)
+import Pure hiding (get,value)
 import Pure.State
 import Pure.Data.Txt.Trie as Trie
 import Pure.Data.JSON
